@@ -5,12 +5,13 @@ interface tag Buffer
   Stores and manipulate a text
   """
   new tag empty(ed: EventDispatcher tag, name': String = "[No Name]")
-  be for_lines(notifier: LineNotifier iso)
+  be for_lines(notifier: LineNotifier iso, start: USize, stop: USize)
   be for_line(num: USize, notifier: LineNotifier iso)
   be info(client: BufferInfoClient tag)
   be insert(lineno: USize, pos:USize, chars:Array[U8] val)
   be del(lineno: USize, pos:USize)
   be del_line(lineno: USize)
+  be split_line(lineno: USize, pos: USize)
   be join(lineno: USize)
 
 interface BufferInfoClient
@@ -56,6 +57,18 @@ class BufferLineDelEvent is BufferEvent
     row = r
     lineno = lineno'
   fun name(): String => "BufferLineDel"
+  fun apply(): EventData val => EventData(lineno)
+  fun buffer(): Buffer tag => _buf
+
+class BufferLineNewEvent is BufferEvent
+  let lineno: USize
+  let _buf: Buffer tag
+  let row: Row val
+  new val create(lineno': USize, r: Row val, b: Buffer tag) =>
+    _buf = b
+    row = r
+    lineno = lineno'
+  fun name(): String => "BufferLineNew"
   fun apply(): EventData val => EventData(lineno)
   fun buffer(): Buffer tag => _buf
 
@@ -194,16 +207,15 @@ actor BaseBuffer is Buffer
 
   be split_line(lineno: USize, pos: USize) =>
     try
+      let row = _rows(lineno - 1)
       let remain = _rows(lineno - 1).cut(pos)
-      _rows.insert(lineno, Row(remain))
-      for c in _clients.values() do
-        c.set_buffer_size(_rows.size())
-        c.set_buffer_line_size(lineno - 1, _rows(lineno - 1).size())        
-        c.set_buffer_line_size(lineno, _rows(lineno).size())
-      end
+      let new_row = Row(remain)
+      _rows.insert(lineno, new_row)
+      ev_mgr.send(BufferLineChangedEvent(lineno - 1, row.copy(), _this))
+      ev_mgr.send(BufferLineNewEvent(lineno, new_row.copy(), _this))
     end
 
-  be for_lines(notifier: LineNotifier iso) =>
+  be for_lines(notifier: LineNotifier iso, start: USize=0, stop: USize=0) =>
     let n: LineNotifier ref = consume notifier
     for r in _rows.values() do
       n(r)
