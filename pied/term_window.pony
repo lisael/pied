@@ -53,7 +53,7 @@ actor TermWindow is Window
     | let bs: BufferSizeEvent val => if bs.buffer() is buffer then buf_size = bs.num_lines() end
     | let blc: BufferLineChangedEvent val =>
       if blc.buffer() is buffer then
-        render_line(blc.lineno, blc.row.content(), blc.row.size())
+        render_line(blc.lineno, blc.line.content(), blc.line.size())
       end
     | let bld: BufferLineDelEvent val =>
       if bld.buffer() is buffer then
@@ -124,7 +124,7 @@ actor TermWindow is Window
     if line == 0 then
       let line' = cur_line()
       let notifier = object iso is LineNotifier
-          fun ref apply(r: Row) =>
+          fun ref apply(r: Line) =>
             _this.render_line(line', r.content(), r.size())
         end
       buffer.for_line(line', consume notifier)
@@ -144,7 +144,7 @@ actor TermWindow is Window
   fun ref _redraw() =>
     let notifier = object iso is LineNotifier
         var idx: USize = first_line
-        fun ref apply(r: Row) =>
+        fun ref apply(r: Line) =>
           _this.render_line(idx = idx + 1, r.content(), r.size())
       end
     buffer.for_lines(consume notifier, first_line, _last_line())

@@ -39,10 +39,10 @@ class BufferSizeEvent is BufferEvent
 class BufferLineChangedEvent is BufferEvent
   let lineno: USize
   let _buf: Buffer tag
-  let row: Row val
-  new val create(lineno': USize, r: Row val, b: Buffer tag) =>
+  let line: Line val
+  new val create(lineno': USize, r: Line val, b: Buffer tag) =>
     _buf = b
-    row = r
+    line = r
     lineno = lineno'
   fun name(): String => "BufferLineChanged"
   fun apply(): EventData val => EventData(lineno)
@@ -51,10 +51,10 @@ class BufferLineChangedEvent is BufferEvent
 class BufferLineDelEvent is BufferEvent
   let lineno: USize
   let _buf: Buffer tag
-  let row: Row val
-  new val create(lineno': USize, r: Row val, b: Buffer tag) =>
+  let line: Line val
+  new val create(lineno': USize, r: Line val, b: Buffer tag) =>
     _buf = b
-    row = r
+    line = r
     lineno = lineno'
   fun name(): String => "BufferLineDel"
   fun apply(): EventData val => EventData(lineno)
@@ -63,16 +63,16 @@ class BufferLineDelEvent is BufferEvent
 class BufferLineNewEvent is BufferEvent
   let lineno: USize
   let _buf: Buffer tag
-  let row: Row val
-  new val create(lineno': USize, r: Row val, b: Buffer tag) =>
+  let line: Line val
+  new val create(lineno': USize, r: Line val, b: Buffer tag) =>
     _buf = b
-    row = r
+    line = r
     lineno = lineno'
   fun name(): String => "BufferLineNew"
   fun apply(): EventData val => EventData(lineno)
   fun buffer(): Buffer tag => _buf
 
-class Row
+class Line
   var _content: String
 
   new create(s: String) =>
@@ -105,37 +105,36 @@ class Row
 
   fun content(): String => _content
 
-  fun copy(): Row val =>
-    recover val Row(_content) end
+  fun copy(): Line val =>
+    recover val Line(_content) end
 
 interface BufferAccessor
   fun ref apply(b: Buffer ref)
 
 actor BaseBuffer is Buffer
-  let _rows: Array[Row] ref
+  let lines: Array[Line] ref
   let _name: String
   let _clients: Array[BufferNotifier tag] = Array[BufferNotifier tag]
   let _this: BaseBuffer tag
   let ev_mgr: EventDispatcher tag
 
-  new create(ed: EventDispatcher tag, rows: Array[Row] iso, name': String = "[No Name]") =>
-    _rows = consume rows
+  new create(ed: EventDispatcher tag, rows: Array[Line] iso, name': String = "[No Name]") =>
+    lines = consume rows
     _name = name'
     ev_mgr = ed
     _this = recover tag this end
 
   new empty(ed: EventDispatcher tag, name': String = "[No Name]") =>
-    _rows = Array[Row]
-    _rows.push(Row(""))
-    _rows.push(Row("coucou"))
+    lines = Array[Line]
+    lines.push(Line(""))
     _name = name'
     ev_mgr = ed
     _this = recover tag this end
 
   new from_stings(ed: EventDispatcher tag, strings: Array[String] val, name': String = "[No Name]") =>
-    _rows = recover Array[Row] end
+    lines = recover Array[Line] end
     for s in strings.values() do
-      _rows.push(Row(s))
+      lines.push(Line(s))
     end
     _name = name'
     ev_mgr = ed
@@ -143,27 +142,27 @@ actor BaseBuffer is Buffer
 
   be info(client: BufferInfoClient tag) =>
     let sizes = recover trn Array[USize] end
-    for r in _rows.values() do
+    for r in lines.values() do
       sizes.push(r.size())
     end
     client.buffer_info(BufferInfo(consume val sizes))
  
   be register(n: BufferNotifier tag) =>
     _clients.push(n)
-    n.set_buffer_size(_rows.size())
+    n.set_buffer_size(lines.size())
     n.set_buffer_name(_name)
-    for (idx, r) in _rows.pairs() do
+    for (idx, r) in lines.pairs() do
       n.set_buffer_line_size(idx + 1, r.size())
     end
 
   fun _notify_size() =>
     for c in _clients.values() do
-      c.set_buffer_size(_rows.size())
+      c.set_buffer_size(lines.size())
     end
 
   fun _notify_line_size(lineno: USize) =>
     for c in _clients.values() do
-      try c.set_buffer_line_size(lineno, _rows(lineno - 1).size()) end
+      try c.set_buffer_line_size(lineno, lines(lineno - 1).size()) end
     end
 
   fun _notify_del_line(lineno: USize) =>
@@ -177,17 +176,17 @@ actor BaseBuffer is Buffer
 
   be insert(lineno: USize, pos:USize, chars:Array[U8] val) =>
     try
-      let row = _rows(lineno-1)
-      row.insert(pos, chars)
-      let copy = row.copy()
+      let line = lines(lineno-1)
+      line.insert(pos, chars)
+      let copy = line.copy()
       ev_mgr.send(BufferLineChangedEvent(lineno, copy, _this))
     end
 
   be del(lineno: USize, pos:USize) =>
     try
-      let row = _rows(lineno-1)
-      row.del(pos)
-      let copy = row.copy()
+      let line = lines(lineno-1)
+      line.del(pos)
+      let copy = line.copy()
       ev_mgr.send(BufferLineChangedEvent(lineno, copy, _this))
     end
 
@@ -196,45 +195,45 @@ actor BaseBuffer is Buffer
 
   fun ref _del_line(lineno: USize) =>
       try
-        let row = _rows.delete(lineno - 1)
-        ev_mgr.send(BufferLineDelEvent(lineno, row.copy(), _this))
+        let line = lines.delete(lineno - 1)
+        ev_mgr.send(BufferLineDelEvent(lineno, line.copy(), _this))
       end
 
   be join(lineno: USize)  =>
     try
-      let row = _rows(lineno - 1)
-      let next = _rows(lineno)
-      row.insert(row.size() + 1, next.content())
+      let line = lines(lineno - 1)
+      let next = lines(lineno)
+      line.insert(line.size() + 1, next.content())
       _del_line(lineno + 1)
-      ev_mgr.send(BufferLineChangedEvent(lineno, row.copy(), _this))
+      ev_mgr.send(BufferLineChangedEvent(lineno, line.copy(), _this))
     end
 
   be split_line(lineno: USize, pos: USize) =>
     try
-      let row = _rows(lineno - 1)
-      let remain = _rows(lineno - 1).cut(pos)
-      let new_row = Row(remain)
-      _rows.insert(lineno, new_row)
-      ev_mgr.send(BufferLineChangedEvent(lineno - 1, row.copy(), _this))
+      let line = lines(lineno - 1)
+      let remain = lines(lineno - 1).cut(pos)
+      let new_row = Line(remain)
+      lines.insert(lineno, new_row)
+      ev_mgr.send(BufferLineChangedEvent(lineno - 1, line.copy(), _this))
       ev_mgr.send(BufferLineNewEvent(lineno, new_row.copy(), _this))
     end
 
   be for_lines(notifier: LineNotifier iso, start: USize=0, stop: USize=0) =>
     let n: LineNotifier ref = consume notifier
-    for r in _rows.values() do
+    for r in lines.values() do
       n(r)
     end
 
   be for_line(num: USize, notifier: LineNotifier iso) =>
     let n: LineNotifier ref = consume notifier
-    try n(_rows(num - 1)) end
+    try n(lines(num - 1)) end
 
-  fun size(): USize => _rows.size()
+  fun size(): USize => lines.size()
 
-  fun line_size(lineno: USize): USize ? => _rows(lineno).size()
+  fun line_size(lineno: USize): USize ? => lines(lineno).size()
 
 interface LineNotifier
-  fun ref apply(r: Row)
+  fun ref apply(r: Line)
 
 interface BufferNotifier
   be set_buffer_size(s: USize) => None
