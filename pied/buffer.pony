@@ -80,23 +80,27 @@ class Row
 
   fun ref insert(pos: USize, chars: Array[U8] val) =>
     let s = String.from_array(chars)
-    _content = _content.trim(0, pos-1) + s + _content.trim(pos-1)
+    insert(pos, s)
 
   fun ref insert(pos: USize, chars: String val) =>
-    _content = _content.trim(0, pos-1) + chars + _content.trim(pos-1)
+    let byte = PosToByte(_content, pos-1)
+    _content = _content.trim(0, byte) + chars + _content.trim(byte)
 
   fun render(out: OutStream) =>
     out.write(_content)
 
   fun size(): USize =>
-    _content.size()
+    _content.codepoints()
 
   fun ref del(pos:USize) =>
-    _content = _content.trim(0, pos - 1) + _content.trim(pos)
+    let byte = PosToByte(_content, pos-1)
+    let next = PosToByte(_content, pos)
+    _content = _content.trim(0, byte) + _content.trim(next)
 
   fun ref cut(pos: USize): String =>
-    let result = _content.trim(pos - 1)
-    _content = _content.trim(0, pos - 1)
+    let byte = PosToByte(_content, pos-1)
+    let result = _content.trim(byte)
+    _content = _content.trim(0, byte)
     result
 
   fun content(): String => _content

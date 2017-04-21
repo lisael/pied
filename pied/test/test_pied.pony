@@ -15,13 +15,21 @@ actor Main is TestList
     None
 
   fun tag tests(test: PonyTest) =>
-    test(_TestAdd)
+    test(_TestPosToByte)
 
-class iso _TestAdd is UnitTest
+class iso _TestPosToByte is UnitTest
 
-  fun name():String => "Contains"
+  fun name():String => "PosToByte"
 
   fun apply(h: TestHelper) =>
-    h.assert_eq[I32](2+2, 4)
+    // h.assert_eq[USize](PosToByte("", 0), 0)
+    // h.assert_eq[USize](PosToByte("", 1), 0)
+    // h.assert_eq[USize](PosToByte("1", 0), 0)
+    // h.assert_eq[USize](PosToByte("1", 1), 1)
+    // h.assert_eq[USize](PosToByte("1è", 1), 1)
+    // h.assert_eq[USize]("1è".size(), 3)
+    h.assert_eq[USize](PosToByte("1è", 2), 3)
+    // h.assert_eq[USize](PosToByte("", 0), 0)
+    // h.assert_eq[USize](PosToByte("", 0), 0)
 
 

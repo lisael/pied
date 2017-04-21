@@ -1,10 +1,13 @@
 class TermViEditMode is InputMode
   let win: TermWindow tag
   let input: TermInput tag
+  var codepoint: Array[U8] trn
+  var codepoint_size: USize = 1
 
   new iso create(input': TermInput tag, w: TermWindow tag) =>
     win = w
     input = input'
+    codepoint = recover trn Array[U8] end
 
   fun name(): String => "normal"
 
@@ -22,9 +25,36 @@ class TermViEditMode is InputMode
     | if data < 0x20 => None // unknown control character
     | 0x7F => backspace() // backspace
     else
-      // Insert.
-      let inp: Array[U8] val = recover val [data] end
-      win.insert(inp)
+      match data
+        // Insert.
+      | if (data >= 240) and (data < 248)  =>  // 11110xxx
+        codepoint_size = 4
+        codepoint = recover trn Array[U8](4) end
+      | if (data >= 224) and (data < 240) =>  // 1110xxx
+        codepoint_size = 3
+        codepoint = recover trn Array[U8](3) end
+      | if (data >= 192) and (data < 224) =>  // 110xxxxx
+        codepoint_size = 2
+        codepoint = recover trn Array[U8](2) end
+      | if (data >= 128) and (data < 192) =>  // 10xxxxxx
+        if codepoint_size == 1 then
+          // bad utf-8 encoding, ditch the input
+          return
+        end
+      | if data < 128 =>  // ascii
+        if codepoint_size != 1 then
+          // bad utf-8 encoding, ditch the input and reset the codepoint
+          codepoint_size = 1
+          codepoint = recover trn Array[U8](1) end
+          return
+        end
+      end
+      codepoint.push(data)
+      if codepoint.size() == codepoint_size then
+        let input': Array[U8] val = codepoint = recover trn Array[U8](1) end
+        codepoint_size = 1
+        win.insert(input')      
+      end
     end
 
   // move
