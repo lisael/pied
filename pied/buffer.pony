@@ -218,10 +218,17 @@ actor BaseBuffer is Buffer
       ev_mgr.send(BufferLineNewEvent(lineno, new_row.copy(), _this))
     end
 
-  be for_lines(notifier: LineNotifier iso, start: USize=0, stop: USize=0) =>
+  be for_lines(notifier: LineNotifier iso, start: USize=1, stop: USize=0) =>
     let n: LineNotifier ref = consume notifier
+    var loop: USize = 1
     for r in lines.values() do
-      n(r)
+      if loop >= start then
+        n(r)
+      end
+      loop = loop + 1
+      if (stop > 0) and (loop > stop) then
+        break
+      end
     end
 
   be for_line(num: USize, notifier: LineNotifier iso) =>

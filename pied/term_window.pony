@@ -24,7 +24,7 @@ actor TermWindow is Window
   var line_sizes: Array[USize] = Array[USize]
   let status_line: TermStatusLine tag
   let _this: TermWindow tag
-  let first_line: USize = 1
+  var first_line: USize = 1
 
   new create(b: Buffer tag, out': OutStream, ed: EventDispatcher tag) =>
     buffer = b
@@ -57,13 +57,13 @@ actor TermWindow is Window
       end
     | let bld: BufferLineDelEvent val =>
       if bld.buffer() is buffer then
-        _redraw()
         buf_size = buf_size - 1
+        _redraw()
       end
     | let bln: BufferLineNewEvent val =>
       if bln.buffer() is buffer then
-        _redraw()
         buf_size = buf_size + 1
+        _redraw()
       end
     end
 
@@ -72,9 +72,17 @@ actor TermWindow is Window
     """last line as a row"""
     _line_to_row(buf_size)
 
-  fun _last_line(): USize =>
+  fun _last_visible_row(): USize =>
+    _line_to_row(_last_visible_line())
+
+  fun _last_visible_line(): USize =>
     """last visble line in the window"""
-    buf_size
+    var last_row = _last_row()
+    if last_row > (height - 2) then
+      _row_to_line(height - 2)
+    else
+      buf_size
+    end
 
   fun _reset_cursor(notify: Bool=false) =>
     out.write(MoveTo(cur_row, cur_col))
@@ -89,7 +97,7 @@ actor TermWindow is Window
   fun _line_to_row(line: USize): USize =>
     (line - first_line) + 1
 
-  fun _row_to_line(row: USize) =>
+  fun _row_to_line(row: USize): USize =>
     (first_line + row) - 1
 
   be write(data: String, reset_cursor: Bool=true) =>
@@ -98,15 +106,15 @@ actor TermWindow is Window
       _reset_cursor()
     end
 
-  fun ref _move_cursor(line: USize, col: USize, notify: Bool=false) =>
+  fun ref _move_cursor(row: USize, col: USize, notify: Bool=false) =>
     var changed = false
-    if line != 0 then
-      let old_line = cur_row = line
-      changed = old_line != line
+    if row != 0 then
+      let old_row = cur_row = row
+      changed = old_row != row
     end
     if col != 0 then
       let old_col = cur_col = col
-      changed = old_col != col
+      changed = changed or (old_col != col)
     end
     _reset_cursor(notify and changed)
 
@@ -129,9 +137,9 @@ actor TermWindow is Window
         end
       buffer.for_line(line', consume notifier)
     else
-      if (line >= first_line) and (line <= _last_line()) then
+      if (line >= first_line) and (line <= _last_visible_line()) then
         out.write(ClearLine(_line_to_row(line)))
-        // out.write(line.string() + " " + first_line.string() + " " + _last_line().string() + " ")
+        // out.write(line.string() + " " + first_line.string() + " " + _last_visible_line().string() + " ")
         out.write(content)
       end
       set_line_size(line, size)
@@ -147,7 +155,7 @@ actor TermWindow is Window
         fun ref apply(r: Line) =>
           _this.render_line(idx = idx + 1, r.content(), r.size())
       end
-    buffer.for_lines(consume notifier, first_line, _last_line())
+    buffer.for_lines(consume notifier, first_line, _last_visible_line())
     if height > 1 then
       for row in Range(_last_row(), height - 1 ) do
         out.write(ClearLine(row))
@@ -156,6 +164,29 @@ actor TermWindow is Window
     end
     _reset_cursor()
 
+  // Scroll //
+  be scroll(rows: ISize) =>
+    _scroll(rows)
+    
+  fun ref _scroll(rows: ISize) =>
+    if rows > 0 then _scroll_down(rows.usize()) end
+    if rows < 0 then _scroll_up((0 - rows).usize()) end
+
+  fun ref _scroll_up(rows: USize) =>
+    if first_line <= rows then
+      first_line = 1
+    else
+      first_line = first_line - rows
+    end
+    _redraw()
+    _reset_cursor(true)
+
+  fun ref _scroll_down(rows: USize) =>
+    let expected = first_line + rows
+    first_line = expected.min(buf_size) 
+    _redraw()
+    _reset_cursor(true)
+
   // Insert //
   be insert(chars: Array[U8] val) =>
     buffer.insert(cur_line(), cur_pos(), chars)
@@ -163,7 +194,9 @@ actor TermWindow is Window
 
   be split_line() =>
     buffer.split_line(cur_line(), cur_pos())
-    _move_cursor(cur_row + 1, 1, true)
+    _down(true, true)
+    _home(true)
+    redraw()
 
   be backspace() =>
     if cur_col == 1 then
@@ -197,18 +230,31 @@ actor TermWindow is Window
   be down() =>
     _down(true)
 
-  fun ref _down(notify: Bool=false) =>
-    if cur_row < _last_row() then
-      var col: USize = 0
-      let row = cur_row + 1
-      try
-        let ls = line_sizes(cur_line() + 1)
-        if cur_col > ls then
-          col = ls + 1
-        end
-      end
-      _move_cursor(row, col, notify)
+  fun ref _down(notify: Bool=false, force: Bool=false) =>
+    if (cur_line() == buf_size) and not force then
+      return
     end
+    var row = cur_row
+    if cur_row < _last_visible_row() then
+      row = row + 1
+    else
+      if (not force) or (cur_row == (height - 2)) then
+        _scroll_down(1)
+      else
+        row = row + 1
+      end
+    end
+    let col: USize = try
+      let ls = line_sizes(cur_line() + 1)
+      if cur_col > ls then
+        ls + 1
+      else
+        0
+      end
+    else
+      1
+    end
+    _move_cursor(row, col, notify)
 
   be left() =>
     _left(true)
@@ -224,7 +270,12 @@ actor TermWindow is Window
   fun ref _up(notify: Bool=false) =>
     if cur_line() > 1 then
       var col: USize = 0
-      let row = cur_row - 1
+      var row = cur_row 
+      if cur_row == 1 then
+        _scroll_up(1)
+      else
+        row = cur_row - 1
+      end
       try
         let ls = line_sizes(cur_line() - 1)
         if cur_col > ls then
@@ -235,7 +286,10 @@ actor TermWindow is Window
     end
 
   be home() =>
-    _move_cursor(0, 1, true)
+    _home(true)
+
+  fun ref _home(notify: Bool=true) =>
+    _move_cursor(0, 1, notify)
 
   be right() =>
     _right(true)
