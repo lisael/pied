@@ -22,9 +22,11 @@ actor TermWindow is Window
   let emgr: EventDispatcher tag
   let out: OutStream
   var line_sizes: Array[USize] = Array[USize]
+  var prefix_sizes: Array[USize] = Array[USize]
   let status_line: TermStatusLine tag
   let _this: TermWindow tag
   var first_line: USize = 1
+  let renderer: TermRenderer tag
 
   new create(b: Buffer tag, out': OutStream, ed: EventDispatcher tag) =>
     buffer = b
@@ -40,6 +42,9 @@ actor TermWindow is Window
         "BufferLineNew"
       ] end)
     b.info(this)
+    renderer = TermRenderer(_this)
+    renderer.register_highlighter(recover tag RedHighlighter end)
+    renderer.register_highlighter(recover tag LineNumberHighlighter(_this, b, ed) end)
 
   // Plumbing //
   be buffer_info(bi: BufferInfo val) =>
@@ -85,9 +90,11 @@ actor TermWindow is Window
     end
 
   fun _reset_cursor(notify: Bool=false) =>
-    out.write(MoveTo(cur_row, cur_col))
-    if notify then
-      emgr.send(CursorMoveEvent(cur_line(), cur_pos()))
+    try
+      out.write(MoveTo(cur_row, cur_col + prefix_sizes(cur_line())))
+      if notify then
+        emgr.send(CursorMoveEvent(cur_line(), cur_pos()))
+      end
     end
 
   fun cur_pos(): USize => cur_col
@@ -127,20 +134,36 @@ actor TermWindow is Window
     end
     try line_sizes.update(line, size) end
 
+  fun ref set_prefix_size(line: USize, size: USize) =>
+    while line > prefix_sizes.size() do
+      line_sizes.reserve(prefix_sizes.size() + 20)
+      for _ in Range(0,20) do
+        prefix_sizes.push(0)
+      end
+    end
+    try prefix_sizes.update(line, size) end
+
   // Render //
+  be render_row(r: TermRow iso) =>
+    set_prefix_size(r.lineno, r.prefix_size)
+    out.write(ClearLine(_line_to_row(r.lineno)))
+    out.write(r.render())
+    _reset_cursor(true)
+
   be render_line(line: USize=0, content: String="", size: USize=0) =>
     if line == 0 then
       let line' = cur_line()
       let notifier = object iso is LineNotifier
-          fun ref apply(r: Line) =>
-            _this.render_line(line', r.content(), r.size())
+          fun ref apply(l: Line) =>
+            _this.render_line(line', l.content(), l.size())
         end
       buffer.for_line(line', consume notifier)
     else
       if (line >= first_line) and (line <= _last_visible_line()) then
-        out.write(ClearLine(_line_to_row(line)))
+        renderer.render(TermRow(line, content, size))
+        // out.write(ClearLine(_line_to_row(line)))
         // out.write(line.string() + " " + first_line.string() + " " + _last_visible_line().string() + " ")
-        out.write(content)
+        // out.write(content)
       end
       set_line_size(line, size)
       _reset_cursor()
@@ -193,9 +216,12 @@ actor TermWindow is Window
     _move_cursor(0, cur_col + 1, true)
 
   be split_line() =>
+    _split_line(true)
+
+  fun ref _split_line(notify: Bool=false) =>
     buffer.split_line(cur_line(), cur_pos())
-    _down(true, true)
-    _home(true)
+    _down(notify, true)
+    _home(notify)
     redraw()
 
   be backspace() =>
@@ -263,6 +289,21 @@ actor TermWindow is Window
     if cur_col > 1 then
       _move_cursor(0, cur_col - 1, notify)  
     end
+
+  be insert_line() =>
+    _insert_line(true)
+
+  fun ref _insert_line(notify: Bool=true) =>
+    _end_of_line()
+    _split_line(notify)
+
+  be insert_line_above() =>
+    _insert_line_above(true)
+
+  fun ref _insert_line_above(notify: Bool=true) =>
+    _home()
+    _split_line()
+    _up(notify)
 
   be up() =>
     _up(true)
