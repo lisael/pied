@@ -17,6 +17,10 @@ class TermViNormalMode is InputMode
     // | 0x0E => _win.down() // ctrl-n
     // | 0x10 => _win.up() // ctrl-p
     // | 0x1B => esc(input)
+    | 'h' => win.left()
+    | 'j' => win.down()
+    | 'k' => win.up()
+    | 'l' => win.right()
     | 'i' => input.switch_mode_edit()
     | 'o' => win.insert_line(); input.switch_mode_edit()
     | 'O' => win.insert_line_above(); input.switch_mode_edit()
